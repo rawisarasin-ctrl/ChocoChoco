@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบจัดการแพ็คสินค้า & พิมพ์ใบจ่าหน้า</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ตั้งค่าการพิมพ์เฉพาะใบจ่าหน้าพัสดุ */
+    @media print {
+      body * { visibility: hidden; }
+      #printArea, #printArea * { visibility: visible; }
+      #printArea {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100mm; /* ขนาดมาตรฐานใบปะหน้า 100x150mm */
+        padding: 10px;
+        border: 2px solid #000;
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 p-4 md:p-8">
+
+  <div class="max-w-5xl mx-auto">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">📦 ระบบหยิบสินค้า & แพ็คพัสดุ (Fulfillment)</h1>
+      <button onclick="loadOrders()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+        🔄 รีเฟรชข้อมูล
+      </button>
+    </div>
+
+    <div id="ordersList" class="space-y-4">
+      <p class="text-center py-10 text-gray-500">กำลังโหลดข้อมูลจาก Google Sheets...</p>
+    </div>
+  </div>
+
+  <!-- พื้นที่ซ่อนสำหรับพิมพ์ใบจ่าหน้าพัสดุ -->
+  <div id="printArea" class="hidden print:block bg-white text-black font-sans"></div>
+
+  <script>
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyWInTfok-C41hxdaVPc8CaIVJXihTptF44ENNwYhiCOc-UT8GKi1kozoNvHZmNsRKO/exec';
+    async function loadOrders() {
+      const container = document.getElementById('ordersList');
+      container.innerHTML = '<p class="text-center py-10 text-gray-500">กำลังดึงข้อมูลล่าสุด...</p>';
+      
+      try {
+        const res = await fetch(SCRIPT_URL);
+        const orders = await res.json();
+        
+        if (orders.length === 0) {
+          container.innerHTML = '<p class="text-center py-10">ยังไม่มีรายการสั่งซื้อ</p>';
+          return;
+        }
+
+        // เรียงออเดอร์ใหม่สุดขึ้นก่อน
+        orders.reverse();
+        container.innerHTML = '';
+
+        orders.forEach(order => {
+          const isPacked = order.Status === 'แพ็คแล้ว';
+          const badgeColor = isPacked ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800';
+
+          const card = document.createElement('div');
+          card.className = 'bg-white p-5 rounded-xl shadow border border-gray-200 flex flex-col md:flex-row justify-between gap-4';
+          card.innerHTML = `
+            <div class="space-y-2 flex-1">
+              <div class="flex items-center gap-3">
+                <span class="font-bold text-lg text-blue-700">${order.OrderID}</span>
+                <span class="text-xs px-2.5 py-1 rounded-full font-semibold ${badgeColor}">${order.Status}</span>
+                <span class="text-xs text-gray-400">${order.Timestamp}</span>
+              </div>
+              
+              <!-- รายการหยิบสินค้า (Pick List) -->
+              <div class="bg-amber-50 p-3 rounded-lg border border-amber-200">
+                <p class="text-xs font-bold text-amber-900 uppercase mb-1">รายการที่ต้องหยิบลงกล่อง:</p>
+                <ul class="text-sm font-semibold space-y-1">
+                  ${order.SKU1_Qty > 0 ? `<li>✅ [SKU-01] 75% Dark Chocolate : <span class="text-red-600 text-base">${order.SKU1_Qty} แท่ง</span></li>` : ''}
+                  ${order.SKU2_Qty > 0 ? `<li>✅ [SKU-02] Hazelnut Milk Chocolate : <span class="text-red-600 text-base">${order.SKU2_Qty} แท่ง</span></li>` : ''}
+                </ul>
+              </div>
+
+              <!-- ข้อมูลจัดส่ง -->
+              <div class="text-sm text-gray-700 pt-1">
+                <p><strong>ผู้รับ:</strong> ${order.CustomerName} (${order.Phone})</p>
+                <p><strong>ที่อยู่:</strong> ${order.Address}</p>
+                <p><strong>ยอดชำระ:</strong> ฿${order.TotalPrice}</p>
+              </div>
+            </div>
+
+            <!-- ปุ่มจัดการ -->
+            <div class="flex flex-col justify-center gap-2 min-w-[200px] border-t md:border-t-0 md:border-l pt-3 md:pt-0 md:pl-4">
+              <button onclick='printLabel(${JSON.stringify(order)})' class="w-full bg-stone-800 hover:bg-stone-900 text-white py-2 px-4 rounded-lg text-sm font-medium">
+                🖨️ พิมพ์ใบจ่าหน้าพัสดุ
+              </button>
+              ${!isPacked ? `
+                <button onclick="markAsPacked('${order.OrderID}')" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg text-sm font-medium">
+                  ✔️ ยืนยันการแพ็คสินค้า
+                </button>
+              ` : `<p class="text-center text-xs text-green-600 font-bold">บันทึกสถานะแพ็คเรียบร้อย</p>`}
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (err) {
+        container.innerHTML = '<p class="text-center text-red-500">โหลดข้อมูลไม่สำเร็จ ตรวจสอบ URL ของ Apps Script</p>';
+      }
+    }
+
+    // ฟังก์ชันสร้างใบจ่าหน้าพัสดุและสั่ง Print
+    function printLabel(order) {
+      const printArea = document.getElementById('printArea');
+      printArea.innerHTML = `
+        <div style="border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px;">
+          <strong style="font-size: 14px;">ผู้ส่ง (FROM): CHOCO CRAFT</strong><br>
+          <span style="font-size: 12px;">123 ถนนสุขุมวิท กรุงเทพฯ 10110 | โทร: 089-000-0000</span>
+        </div>
+        <div style="padding: 10px 0; border-bottom: 2px dashed #000; margin-bottom: 8px;">
+          <strong style="font-size: 16px;">ผู้รับ (TO): ${order.CustomerName}</strong><br>
+          <span style="font-size: 14px; font-weight: bold;">โทร: ${order.Phone}</span><br>
+          <p style="font-size: 14px; margin-top: 4px; line-height: 1.4;">${order.Address}</p>
+        </div>
+        <div style="font-size: 12px;">
+          <strong>Order ID:</strong> ${order.OrderID}<br>
+          <strong>รายการในกล่อง:</strong> 
+          ${order.SKU1_Qty > 0 ? `SKU-01 (${order.SKU1_Qty}) ` : ''}
+          ${order.SKU2_Qty > 0 ? `SKU-02 (${order.SKU2_Qty})` : ''}
+        </div>
+      `;
+      window.print();
+    }
+
+    // ฟังก์ชันอัปเดตสถานะใน Google Sheet
+    async function markAsPacked(orderId) {
+      if (!confirm(`ยืนยันว่าแพ็คออเดอร์ ${orderId} เรียบร้อยแล้ว?`)) return;
+      
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'updateStatus',
+          orderId: orderId,
+          status: 'แพ็คแล้ว'
+        })
+      });
+      loadOrders();
+    }
+
+    // โหลดข้อมูลทันทีเมื่อเปิดหน้าเว็บ
+    loadOrders();
+  </script>
+</body>
+</html>
